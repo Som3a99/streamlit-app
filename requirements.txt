@@ -5,7 +5,7 @@ Pillow
 streamlit_webrtc
 av
 typing
-PIL
+Pillow
 matplotlib.pyplot
 numpy
 torch
