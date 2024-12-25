@@ -1,0 +1,13 @@
+streamlit
+ultralytics
+opencv-python
+Pillow
+streamlit_webrtc
+av
+typing
+tempfile
+PIL
+matplotlib.pyplot
+numpy
+torch
+pathlib
