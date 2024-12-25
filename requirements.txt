@@ -6,7 +6,7 @@ streamlit_webrtc
 av
 typing
 Pillow
-matplotlib.pyplot
+matplotlib
 numpy
 torch
 pathlib
