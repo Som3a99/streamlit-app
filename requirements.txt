@@ -1,6 +1,5 @@
 streamlit
 ultralytics
-opencv-python
 Pillow
 streamlit_webrtc
 av
@@ -9,4 +8,6 @@ Pillow
 matplotlib
 numpy
 torch
-pathlib
+twilio
+python-dotenv
+opencv-python-headless

@@ -12,6 +12,11 @@ import matplotlib.pyplot as plt
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration, VideoProcessorBase, WebRtcMode
 import av
 from typing import List, NamedTuple
+from twilio.rest import Client
+
+# Add at the start of your script
+import dotenv
+dotenv.load_dotenv()
 
 @st.cache_resource
 def load_model(model_path):
@@ -207,6 +212,7 @@ def infer_uploaded_video(conf, model):
             except Exception as e:
                 st.error(f"Error processing video: {str(e)}")
 
+
 class Detection(NamedTuple):
     class_name: str
     confidence: float
@@ -218,48 +224,80 @@ class VideoTransformer(VideoTransformerBase):
         self.confidence = confidence
         self.detections: List[Detection] = []
         self.frame = None
+        self.last_process_time = time.time()
+        self.process_every = 0.1  # Process every 100ms
         
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
+        current_time = time.time()
         
-        # save the current frame for capture later 
+        # Save the current frame for capture regardless of processing
         self.frame = img.copy()
         
-        # Run detection
-        results = self.model.predict(img, conf=self.confidence)[0]
-        
-        # Process detections
-        self.detections = []
-        for box in results.boxes:
-            class_id = int(box.cls[0])
-            conf = float(box.conf[0])
-            bbox = box.xyxy[0].tolist()
+        # Only process every 100ms to reduce computational load
+        if current_time - self.last_process_time > self.process_every:
+            # Run detection
+            results = self.model.predict(img, conf=self.confidence)[0]
             
-            self.detections.append(Detection(
-                class_name=self.model.names[class_id],
-                confidence=conf,
-                bbox=bbox
-            ))
+            # Update detections list
+            self.detections = []
+            for box in results.boxes:
+                class_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                bbox = box.xyxy[0].tolist()
+                
+                self.detections.append(Detection(
+                    class_name=self.model.names[class_id],
+                    confidence=conf,
+                    bbox=bbox
+                ))
+            
+            # Draw detections
+            annotated_frame = results.plot()
+            self.last_process_time = current_time
+            return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
         
-        # Draw detections
-        annotated_frame = results.plot()
-        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+        # If not processing this frame, return the original
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+@st.cache_data
+def get_ice_servers():
+    ice_servers = [
+        {
+            "urls": [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302"
+            ]
+        }
+    ]
+    
+    try:
+        account_sid = os.environ["TWILIO_ACCOUNT_SID"]
+        auth_token = os.environ["TWILIO_AUTH_TOKEN"]
+        
+        if account_sid and auth_token:
+            client = Client(account_sid, auth_token)
+            token = client.tokens.create()
+            return token.ice_servers
+            
+    except (KeyError, Exception) as e:
+        logger.warning(
+            "Using public STUN servers. For better connectivity, configure Twilio credentials."
+        )
+    
+    return ice_servers
 
 def infer_uploaded_webcam(conf, model):
     """
-    Handle webcam detection using streamlit-webrtc
+    Enhanced webcam detection implementation using streamlit-webrtc
     """
-    st.write("### Real-time Object Detection")
+    st.write("### Real-time Underwater Object Detection")
     
-    # Initialize session state
+    # Initialize session state for captured frames
     if 'captured_frames' not in st.session_state:
         st.session_state.captured_frames = []
-    
-    # WebRTC Configuration
-    rtc_config = RTCConfiguration(
-        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-    )
-    
+
     # Create columns for controls
     col1, col2 = st.columns(2)
     
@@ -267,47 +305,52 @@ def infer_uploaded_webcam(conf, model):
     if col2.button("Clear All Captures"):
         st.session_state.captured_frames = []
         st.experimental_rerun()
+
+    # WebRTC Configuration
+    rtc_config = {"iceServers": get_ice_servers()}
     
-    # Initialize the WebRTC streamer
+    # Initialize the WebRTC streamer with improved configuration
     ctx = webrtc_streamer(
-        key="object-detection",
+        key="underwater-object-detection",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=rtc_config,
         video_transformer_factory=lambda: VideoTransformer(model, conf),
         async_transform=True,
+        media_stream_constraints={
+            "video": {"frameRate": {"ideal": 30}},
+            "audio": False
+        }
     )
-    
+
     # Capture button
     if ctx.video_transformer and col1.button("Capture Frame"):
         try:
-            # Get the current frame and detections
-            if hasattr(ctx.video_transformer, 'detections'):
-                # Create timestamp
+            if hasattr(ctx.video_transformer, 'frame'):
+                # Create timestamp and ensure directory exists
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
+                capture_dir = Path("captures")
+                capture_dir.mkdir(exist_ok=True)
                 
-                # Ensure directory exists
-                os.makedirs("captures", exist_ok=True)
-                
-                # Get the current frame
+                # Get current frame
                 frame = ctx.video_transformer.frame
                 if frame is not None:
                     # Save original frame
-                    original_path = os.path.join("captures", f"frame_original_{timestamp}.jpg")
-                    cv2.imwrite(original_path, frame)
+                    original_path = capture_dir / f"frame_original_{timestamp}.jpg"
+                    cv2.imwrite(str(original_path), frame)
                     
                     # Process frame with detections
                     results = ctx.video_transformer.model.predict(frame, conf=ctx.video_transformer.confidence)[0]
                     processed_frame = results.plot()
                     
                     # Save processed frame
-                    processed_path = os.path.join("captures", f"frame_processed_{timestamp}.jpg")
-                    cv2.imwrite(processed_path, processed_frame)
+                    processed_path = capture_dir / f"frame_processed_{timestamp}.jpg"
+                    cv2.imwrite(str(processed_path), processed_frame)
                     
-                    # Add to session state
+                    # Store in session state
                     st.session_state.captured_frames.append({
                         'timestamp': timestamp,
-                        'processed': processed_path,
-                        'original': original_path,
+                        'processed': str(processed_path),
+                        'original': str(original_path),
                         'detections': [
                             {
                                 'class': det.class_name,
