@@ -1,9 +1,11 @@
 from pathlib import Path
 from PIL import Image
 import streamlit as st
-
+import os
 import config
-from utils import load_model, infer_uploaded_image, infer_uploaded_video, infer_uploaded_webcam
+from utils import load_model, infer_uploaded_image, infer_uploaded_video, infer_uploaded_webcam_cloud, infer_uploaded_webcam_local
+
+IS_LOCAL = os.environ.get('IS_LOCAL', 'false').lower() == 'true'
 
 # setting page layout
 st.set_page_config(
@@ -61,7 +63,10 @@ if source_selectbox == config.SOURCES_LIST[0]: # Image
     infer_uploaded_image(confidence, model)
 elif source_selectbox == config.SOURCES_LIST[1]: # Video
     infer_uploaded_video(confidence, model)
-elif source_selectbox == config.SOURCES_LIST[2]: # Webcam
-    infer_uploaded_webcam(confidence, model)
+elif source_selectbox == config.SOURCES_LIST[2]:  # Webcam
+    if IS_LOCAL:
+        infer_uploaded_webcam_local(confidence, model)
+    else:
+        infer_uploaded_webcam_cloud(confidence, model)
 else:
     st.error("Currently only 'Image' and 'Video' source are implemented")

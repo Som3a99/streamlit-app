@@ -20,6 +20,7 @@ from collections import deque
 
 dotenv.load_dotenv()
 
+
 # Configure logger
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -233,14 +234,9 @@ class VideoTransformer(VideoTransformerBase):
         
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        
-        # save the current frame for capture later 
         self.frame = img.copy()
-        
-        # Run detection
         results = self.model.predict(img, conf=self.confidence)[0]
         
-        # Process detections
         self.detections = []
         for box in results.boxes:
             class_id = int(box.cls[0])
@@ -253,121 +249,115 @@ class VideoTransformer(VideoTransformerBase):
                 bbox=bbox
             ))
         
-        # Draw detections
         annotated_frame = results.plot()
         return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
-import logging
-import os
 
-import streamlit as st
-from twilio.base.exceptions import TwilioRestException
-from twilio.rest import Client
-
-logger = logging.getLogger(__name__)
-
-
-def get_ice_servers():
-    try:
-        account_sid = os.environ["TWILIO_ACCOUNT_SID"]
-        auth_token = os.environ["TWILIO_AUTH_TOKEN"]
-    except KeyError:
-        logger.warning(
-            "Twilio credentials are not set. Fallback to a free STUN server from Google."  # noqa: E501
-        )
-        return [{"urls": ["stun:stun.l.google.com:19302"]}]
-
-    client = Client(account_sid, auth_token)
-
-    try:
-        token = client.tokens.create()
-    except TwilioRestException as e:
-        st.warning(
-            f"Error occurred while accessing Twilio API. Fallback to a free STUN server from Google. ({e})"  # noqa: E501
-        )
-        return [{"urls": ["stun:stun.l.google.com:19302"]}]
-
-    return token.ice_servers
-def infer_uploaded_webcam(conf, model):
+def infer_uploaded_webcam_cloud(conf, model):
     """
-    Handle webcam detection using streamlit-webrtc
+    Cloud version of webcam detection - shows a friendly message
     """
+    st.info("🎥 Webcam Detection Feature")
+    st.warning("""
+        This feature is currently optimized for local deployment and may not work correctly in the cloud environment.
+        
+        To use the webcam detection feature:
+        1. Clone the repository
+        2. Install the required dependencies
+        3. Run the application locally using `streamlit run app.py`
+        
+        We're working on making this feature available in the cloud. Thank you for your understanding!
+    """)
+    
+    # Optional: Add a link to the repository or documentation
+    st.markdown("[📚 Learn more about local deployment](your-repo-link-here)")
+
+def get_available_cameras():
+    """Test available camera indices and return valid ones."""
+    available_cameras = []
+    for i in range(10):  # Test first 10 indexes
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                available_cameras.append(i)
+            cap.release()
+    return available_cameras
+
+def infer_uploaded_webcam_local(conf, model):
     st.write("### Real-time Object Detection")
     
-    # Initialize session state
+    
     if 'captured_frames' not in st.session_state:
-        st.session_state.captured_frames = []
+    st.session_state.captured_frames = []
+
+    # Get available cameras
+    available_cameras = get_available_cameras()
+    if not available_cameras:
+        st.error("No cameras detected")
+        return
     
-    # # WebRTC Configuration
-    # rtc_config = RTCConfiguration(
-    #     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-    # )
+    camera_index = st.selectbox(
+        "Select Camera",
+        available_cameras,
+        format_func=lambda x: f"Camera {x}"
+    )
     
-    # Create columns for controls
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        st.error("Unable to access webcam")
+        return
+
     col1, col2 = st.columns(2)
     
-    # Clear captures button
-    if col2.button("Clear All Captures"):
+    if col2.button("Clear Captures"):
         st.session_state.captured_frames = []
         st.experimental_rerun()
-    
-    # Initialize the WebRTC streamer
-    ctx = webrtc_streamer(
-        key="object-detection",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration={"iceServers": get_ice_servers()},
-        video_transformer_factory=lambda: VideoTransformer(model, conf),
-        async_transform=True,
-        media_stream_constraints={"video": True, "audio": False},
-    )
-    if not webrtc_ctx.state.playing:
-        return
-    # Capture button
-    if ctx.video_transformer and col1.button("Capture Frame"):
-        try:
-            # Get the current frame and detections
-            if hasattr(ctx.video_transformer, 'detections'):
-                # Create timestamp
+
+    FRAME_WINDOW = st.image([])
+    capture_button = col1.button("Capture Frame")
+    stop_button = st.button("Stop")
+
+    while not stop_button:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        results = model.predict(frame, conf=conf)[0]
+        processed_frame = results.plot()
+        
+        FRAME_WINDOW.image(cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB))
+
+        if capture_button:
+            try:
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
-                
-                # Ensure directory exists
                 os.makedirs("captures", exist_ok=True)
                 
-                # Get the current frame
-                frame = ctx.video_transformer.frame
-                if frame is not None:
-                    # Save original frame
-                    original_path = os.path.join("captures", f"frame_original_{timestamp}.jpg")
-                    cv2.imwrite(original_path, frame)
-                    
-                    # Process frame with detections
-                    results = ctx.video_transformer.model.predict(frame, conf=ctx.video_transformer.confidence)[0]
-                    processed_frame = results.plot()
-                    
-                    # Save processed frame
-                    processed_path = os.path.join("captures", f"frame_processed_{timestamp}.jpg")
-                    cv2.imwrite(processed_path, processed_frame)
-                    
-                    # Add to session state
-                    st.session_state.captured_frames.append({
-                        'timestamp': timestamp,
-                        'processed': processed_path,
-                        'original': original_path,
-                        'detections': [
-                            {
-                                'class': det.class_name,
-                                'confidence': det.confidence
-                            }
-                            for det in ctx.video_transformer.detections
-                        ]
-                    })
-                    
-                    st.success("Frame captured successfully!")
-                else:
-                    st.error("No frame available to capture")
-        except Exception as e:
-            st.error(f"Error capturing frame: {str(e)}")
-    
-    # Display captured frames
+                original_path = os.path.join("captures", f"frame_original_{timestamp}.jpg")
+                processed_path = os.path.join("captures", f"frame_processed_{timestamp}.jpg")
+                
+                cv2.imwrite(original_path, frame)
+                cv2.imwrite(processed_path, processed_frame)
+                
+                st.session_state.captured_frames.append({
+                    'timestamp': timestamp,
+                    'processed': processed_path,
+                    'original': original_path,
+                    'detections': [
+                        {
+                            'class': model.names[int(box.cls[0])],
+                            'confidence': float(box.conf[0])
+                        }
+                        for box in results.boxes
+                    ]
+                })
+                st.success("Frame captured!")
+                break
+            except Exception as e:
+                st.error(f"Error capturing frame: {str(e)}")
+                break
+
+    cap.release()
+
     if st.session_state.captured_frames:
         st.write("### Captured Frames")
         for frame_info in reversed(st.session_state.captured_frames):
@@ -398,8 +388,7 @@ def infer_uploaded_webcam(conf, model):
                                 "image/jpeg"
                             )
                 
-                # Display detections
                 st.write("#### Detections:")
                 st.write(f"Total objects detected: {len(frame_info['detections'])}")
                 for detection in frame_info['detections']:
-                    st.write(f"🎯 {detection['class']}: {detection['confidence']:.2%}")
+                    st.write(f"🎯 {detection['class']}: {detection['confidence']:.2%}")     
