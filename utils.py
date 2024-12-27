@@ -314,11 +314,13 @@ def infer_uploaded_webcam(conf, model):
     ctx = webrtc_streamer(
         key="object-detection",
         mode=WebRtcMode.SENDRECV,
-        rtc_configuration=get_ice_servers(),
+        rtc_configuration={"iceServers": get_ice_servers()},
         video_transformer_factory=lambda: VideoTransformer(model, conf),
         async_transform=True,
+        media_stream_constraints={"video": True, "audio": False},
     )
-    
+    if not webrtc_ctx.state.playing:
+        return
     # Capture button
     if ctx.video_transformer and col1.button("Capture Frame"):
         try:
