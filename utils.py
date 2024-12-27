@@ -288,7 +288,7 @@ def infer_uploaded_webcam_local(conf, model):
     
     
     if 'captured_frames' not in st.session_state:
-    st.session_state.captured_frames = []
+        st.session_state.captured_frames = []
 
     # Get available cameras
     available_cameras = get_available_cameras()
