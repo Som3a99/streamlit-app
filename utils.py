@@ -18,6 +18,10 @@ from twilio.rest import Client
 import dotenv
 dotenv.load_dotenv()
 
+# Configure logger
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
 @st.cache_resource
 def load_model(model_path):
     """
