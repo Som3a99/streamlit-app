@@ -391,4 +391,5 @@ def infer_uploaded_webcam_local(conf, model):
                 st.write("#### Detections:")
                 st.write(f"Total objects detected: {len(frame_info['detections'])}")
                 for detection in frame_info['detections']:
-                    st.write(f"🎯 {detection['class']}: {detection['confidence']:.2%}")     
+                    st.write(f"🎯 {detection['class']}: {detection['confidence']:.2%}")
+                    
